@@ -3,7 +3,7 @@ name        = "cargo-gh-shaping"
 description = "Small commandline tool for pinning github actions to commit shas instead of using mutable tags"
 homepage    = "https://github.com/lfarrel6/gh-shaping"
 license     = "MIT"
-version     = "0.3.0"
+version     = "0.4.0"
 edition     = "2024"
 
 [dependencies]
