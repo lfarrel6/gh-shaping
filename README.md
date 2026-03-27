@@ -2,6 +2,11 @@
 
 A cargo plugin for pinning GitHub Actions workflow steps to exact commit SHAs.
 
+The name is a portmanteau of **gh** (GitHub), **SHA**, and **pin** — gh-SHA-ping
+→ gh-shaping. The binary is shipped as `cargo-gh-shaping` so that it integrates
+with cargo's plugin convention and can be invoked as `cargo gh-shaping` from
+anywhere in a project tree.
+
 Mutable refs like `actions/checkout@v4` can silently change what code runs in
 your CI pipeline. Pinning to a SHA makes the dependency immutable — the only
 way it changes is if you explicitly update it.
