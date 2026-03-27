@@ -136,13 +136,10 @@ pub fn resolve_all(
     strategy: &Strategy,
 ) -> HashMap<RefKey, std::result::Result<ResolvedSha, String>> {
     strategy
-        .run(
-            keys.into_iter().collect(),
-            &|key| {
-                let result = resolve(&key).map_err(|e| e.to_string());
-                (key, result)
-            },
-        )
+        .run(keys.into_iter().collect(), &|key| {
+            let result = resolve(&key).map_err(|e| e.to_string());
+            (key, result)
+        })
         .into_iter()
         .collect()
 }
@@ -260,7 +257,10 @@ pub fn list_tags_newest_first(owner: &str, repo: &str) -> Result<Vec<String>> {
         // All tags are semver — sort them
         let mut sorted = semver_tags;
         sorted.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
-        return Ok(sorted.into_iter().map(|(_, _, _, t)| t.to_string()).collect());
+        return Ok(sorted
+            .into_iter()
+            .map(|(_, _, _, t)| t.to_string())
+            .collect());
     }
 
     // Fall back to reverse lexicographic

@@ -96,12 +96,7 @@ pub fn write_report(rows: &[AuditRow], output: Option<&Path>) -> crate::error::R
         .max(6);
     let ref_w = rows
         .iter()
-        .map(|r| {
-            r.raw
-                .split_once('@')
-                .map(|(_, v)| v.len())
-                .unwrap_or(3)
-        })
+        .map(|r| r.raw.split_once('@').map(|(_, v)| v.len()).unwrap_or(3))
         .max()
         .unwrap_or(3)
         .max(3);
@@ -109,14 +104,22 @@ pub fn write_report(rows: &[AuditRow], output: Option<&Path>) -> crate::error::R
     // Header
     buf.push_str(&format!(
         "{:<file_w$}  {:<action_w$}  {:<ref_w$}  {:<42}  {}\n",
-        "FILE", "ACTION", "REF", "SHA", "STATUS",
+        "FILE",
+        "ACTION",
+        "REF",
+        "SHA",
+        "STATUS",
         file_w = file_w,
         action_w = action_w,
         ref_w = ref_w,
     ));
     buf.push_str(&format!(
         "{:-<file_w$}  {:-<action_w$}  {:-<ref_w$}  {:-<42}  {:-<14}\n",
-        "", "", "", "", "",
+        "",
+        "",
+        "",
+        "",
+        "",
         file_w = file_w,
         action_w = action_w,
         ref_w = ref_w,

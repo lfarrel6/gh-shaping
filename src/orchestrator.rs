@@ -9,11 +9,8 @@
 /// binary, use [`Strategy`], which wraps the two built-in implementations and
 /// exposes a generic `run` method without trait objects.
 pub trait Orchestrate<Item: Send, Output: Send>: Send + Sync {
-    fn run(
-        &self,
-        items: Vec<Item>,
-        worker: &(dyn Fn(Item) -> Output + Send + Sync),
-    ) -> Vec<Output>;
+    fn run(&self, items: Vec<Item>, worker: &(dyn Fn(Item) -> Output + Send + Sync))
+    -> Vec<Output>;
 }
 
 // ── built-in implementations ──────────────────────────────────────────────────

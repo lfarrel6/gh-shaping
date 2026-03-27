@@ -27,7 +27,10 @@ pub struct TagEntry {
 
 impl TagEntry {
     pub fn from_pairs(pairs: Vec<(String, String)>) -> Vec<Self> {
-        pairs.into_iter().map(|(tag, sha)| TagEntry { tag, sha }).collect()
+        pairs
+            .into_iter()
+            .map(|(tag, sha)| TagEntry { tag, sha })
+            .collect()
     }
 }
 
@@ -137,7 +140,15 @@ pub fn pick_version(
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(
-        mode, file, action, current_ref, tags, context_lines, context_highlight, owner, repo,
+        mode,
+        file,
+        action,
+        current_ref,
+        tags,
+        context_lines,
+        context_highlight,
+        owner,
+        repo,
     );
 
     let result = run_loop(&mut terminal, &mut app);
@@ -149,7 +160,10 @@ pub fn pick_version(
     result
 }
 
-fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<Choice> {
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+) -> io::Result<Choice> {
     loop {
         terminal.draw(|frame| render(frame, app))?;
 
@@ -203,8 +217,11 @@ fn render_title(frame: &mut Frame, app: &App, area: Rect) {
         "update" => " gh-shaping — interactive update ",
         _ => " gh-shaping — interactive migrate ",
     };
-    let title = Paragraph::new(label)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    let title = Paragraph::new(label).style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(title, area);
 }
 
@@ -216,7 +233,12 @@ fn render_info(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Action:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(app.action, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                app.action,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  Current: ", Style::default().fg(Color::DarkGray)),
@@ -239,16 +261,17 @@ fn render_version_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .tags
         .iter()
         .map(|entry| {
-            let sha_short = if entry.sha.len() >= 12 { &entry.sha[..12] } else { &entry.sha };
+            let sha_short = if entry.sha.len() >= 12 {
+                &entry.sha[..12]
+            } else {
+                &entry.sha
+            };
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!(" {:<18}", entry.tag),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(
-                    sha_short.to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(sha_short.to_string(), Style::default().fg(Color::DarkGray)),
             ]))
         })
         .collect();
@@ -280,7 +303,9 @@ fn render_context(frame: &mut Frame, app: &App, area: Rect) {
                 if i == app.context_highlight {
                     Line::from(Span::styled(
                         format!("► {line}"),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ))
                 } else {
                     Line::from(Span::styled(
@@ -292,9 +317,13 @@ fn render_context(frame: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let block = Block::default().borders(Borders::ALL).title(" Workflow Context ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Workflow Context ");
     frame.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -313,5 +342,7 @@ fn open_url(url: &str) {
     #[cfg(target_os = "linux")]
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", url])
+        .spawn();
 }

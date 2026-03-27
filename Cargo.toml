@@ -1,13 +1,15 @@
 [package]
-name = "cargo-gh-shaping"
-version = "0.1.0"
-edition = "2024"
+name        = "cargo-gh-shaping"
+description = "Small commandline tool for pinning github actions to commit shas instead of using mutable tags"
+license     = "MIT"
+version     = "0.1.0"
+edition     = "2024"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
+clap       = { version = "4", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-thiserror = "2"
-regex = "1"
-ratatui = "0.30"
-crossterm = "0.29"
+thiserror  = "2"
+regex      = "1"
+ratatui    = "0.30"
+crossterm  = "0.29"

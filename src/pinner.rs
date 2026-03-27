@@ -10,7 +10,13 @@ use crate::workflow::ActionRef;
 
 /// Rewrite `uses: action@old_ref` → `uses: action@sha # label` in a file in-place.
 /// Returns true if the file was modified.
-pub fn rewrite_uses(file: &Path, action: &str, old_ref: &str, sha: &str, label: &str) -> Result<bool> {
+pub fn rewrite_uses(
+    file: &Path,
+    action: &str,
+    old_ref: &str,
+    sha: &str,
+    label: &str,
+) -> Result<bool> {
     let content = fs::read_to_string(file)?;
     let pattern = format!(
         r"(uses:\s+)({action}@{old_ref})(\s*#[^\n]*)?",
@@ -18,7 +24,12 @@ pub fn rewrite_uses(file: &Path, action: &str, old_ref: &str, sha: &str, label: 
         old_ref = regex::escape(old_ref),
     );
     let re = Regex::new(&pattern).expect("invalid regex");
-    let replacement = format!("${{1}}{action}@{sha} # {label}", action = action, sha = sha, label = label);
+    let replacement = format!(
+        "${{1}}{action}@{sha} # {label}",
+        action = action,
+        sha = sha,
+        label = label
+    );
     let new_content = re.replace_all(&content, replacement.as_str());
     if new_content.as_ref() != content.as_str() {
         fs::write(file, new_content.as_ref())?;
@@ -60,7 +71,8 @@ pub fn pin_workflow_file(
             ref_str = regex::escape(&r.ref_str),
         );
         let re = Regex::new(&pattern).expect("invalid regex");
-        let replacement = format!("${{1}}{action}@{sha} # {ref_str}",
+        let replacement = format!(
+            "${{1}}{action}@{sha} # {ref_str}",
             action = r.action,
             sha = sha,
             ref_str = r.ref_str,

@@ -29,17 +29,24 @@ fn main() -> Result<()> {
     };
 
     match cli.command {
-        Command::Migrate { workflows_dir, interactive } => {
+        Command::Migrate {
+            workflows_dir,
+            interactive,
+        } => {
             if interactive {
                 run_migrate_interactive(&workflows_dir, &strategy)
             } else {
                 run_migrate(&workflows_dir, &strategy)
             }
         }
-        Command::Audit { workflows_dir, output } => {
-            run_audit(&workflows_dir, output.as_deref(), &strategy)
-        }
-        Command::Update { workflows_dir, interactive } => {
+        Command::Audit {
+            workflows_dir,
+            output,
+        } => run_audit(&workflows_dir, output.as_deref(), &strategy),
+        Command::Update {
+            workflows_dir,
+            interactive,
+        } => {
             if interactive {
                 run_update_interactive(&workflows_dir, &strategy)
             } else {
@@ -74,10 +81,7 @@ fn collect_refs(files: &[PathBuf], strategy: &Strategy) -> Vec<ActionRef> {
 
 // ── migrate ───────────────────────────────────────────────────────────────────
 
-fn run_migrate(
-    workflows_dir: &Path,
-    strategy: &Strategy,
-) -> Result<()> {
+fn run_migrate(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -97,7 +101,11 @@ fn run_migrate(
 
     let mut total = 0;
     for file in &files {
-        let file_refs: Vec<_> = all_refs.iter().filter(|r| r.file == *file).cloned().collect();
+        let file_refs: Vec<_> = all_refs
+            .iter()
+            .filter(|r| r.file == *file)
+            .cloned()
+            .collect();
         match pinner::pin_workflow_file(file, &resolution_map, &file_refs) {
             Ok(n) => {
                 if n > 0 {
@@ -117,10 +125,7 @@ fn run_migrate(
     Ok(())
 }
 
-fn run_migrate_interactive(
-    workflows_dir: &Path,
-    strategy: &Strategy,
-) -> Result<()> {
+fn run_migrate_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -149,8 +154,14 @@ fn run_migrate_interactive(
 
         eprint!("fetching tags for {}... ", r.action);
         let tags = match resolver::list_tags_with_shas(&key.owner, &key.repo) {
-            Ok(t) => { eprintln!("{} tag(s)", t.len()); t }
-            Err(e) => { eprintln!("error: {e}"); continue; }
+            Ok(t) => {
+                eprintln!("{} tag(s)", t.len());
+                t
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                continue;
+            }
         };
 
         let (ctx_lines, ctx_highlight) = workflow::extract_context(&r.file, &r.raw, 3);
@@ -177,7 +188,9 @@ fn run_migrate_interactive(
                     });
                     if has_ref {
                         match pinner::rewrite_uses(file, &r.action, &r.ref_str, &sha, &tag) {
-                            Ok(true) => { pinned += 1; }
+                            Ok(true) => {
+                                pinned += 1;
+                            }
                             Ok(false) => {}
                             Err(e) => eprintln!("error writing {}: {e}", file.display()),
                         }
@@ -185,11 +198,17 @@ fn run_migrate_interactive(
                 }
                 println!(
                     "pinned {}@{} → {} ({}) in {pinned} file(s)",
-                    r.action, r.ref_str, &sha[..8], tag
+                    r.action,
+                    r.ref_str,
+                    &sha[..8],
+                    tag
                 );
             }
             interactive::Choice::Skip => println!("skipped {}", r.action),
-            interactive::Choice::Quit => { println!("quit"); return Ok(()); }
+            interactive::Choice::Quit => {
+                println!("quit");
+                return Ok(());
+            }
         }
     }
     Ok(())
@@ -197,11 +216,7 @@ fn run_migrate_interactive(
 
 // ── audit ─────────────────────────────────────────────────────────────────────
 
-fn run_audit(
-    workflows_dir: &Path,
-    output: Option<&Path>,
-    strategy: &Strategy,
-) -> Result<()> {
+fn run_audit(workflows_dir: &Path, output: Option<&Path>, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -225,10 +240,7 @@ fn run_audit(
 
 // ── update ────────────────────────────────────────────────────────────────────
 
-fn run_update(
-    workflows_dir: &Path,
-    strategy: &Strategy,
-) -> Result<()> {
+fn run_update(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -252,7 +264,10 @@ fn run_update(
     for r in &updated {
         println!(
             "  updated  {}  {} → {} ({})",
-            r.action, &r.old_sha[..8], &r.new_sha[..8], r.tag,
+            r.action,
+            &r.old_sha[..8],
+            &r.new_sha[..8],
+            r.tag,
         );
     }
     for r in &current {
@@ -267,10 +282,7 @@ fn run_update(
     Ok(())
 }
 
-fn run_update_interactive(
-    workflows_dir: &Path,
-    strategy: &Strategy,
-) -> Result<()> {
+fn run_update_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -299,8 +311,14 @@ fn run_update_interactive(
 
         eprint!("fetching tags for {}... ", r.action);
         let tags = match resolver::list_tags_with_shas(&key.owner, &key.repo) {
-            Ok(t) => { eprintln!("{} tag(s)", t.len()); t }
-            Err(e) => { eprintln!("error: {e}"); continue; }
+            Ok(t) => {
+                eprintln!("{} tag(s)", t.len());
+                t
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                continue;
+            }
         };
 
         let current_display = match &r.inline_comment {
@@ -337,7 +355,9 @@ fn run_update_interactive(
                     });
                     if has_ref {
                         match pinner::rewrite_uses(file, &r.action, &r.ref_str, &sha, &label) {
-                            Ok(true) => { updated += 1; }
+                            Ok(true) => {
+                                updated += 1;
+                            }
                             Ok(false) => {}
                             Err(e) => eprintln!("error writing {}: {e}", file.display()),
                         }
@@ -345,11 +365,17 @@ fn run_update_interactive(
                 }
                 println!(
                     "updated {}  {} → {} ({}) in {updated} file(s)",
-                    r.action, &r.ref_str[..8], &sha[..8], tag,
+                    r.action,
+                    &r.ref_str[..8],
+                    &sha[..8],
+                    tag,
                 );
             }
             interactive::Choice::Skip => println!("skipped {}", r.action),
-            interactive::Choice::Quit => { println!("quit"); return Ok(()); }
+            interactive::Choice::Quit => {
+                println!("quit");
+                return Ok(());
+            }
         }
     }
     Ok(())

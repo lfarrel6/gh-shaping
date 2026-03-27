@@ -119,7 +119,10 @@ pub fn extract_context(file: &Path, uses_raw: &str, context: usize) -> (Vec<Stri
         // A step line is typically "        - uses: owner/repo@ref", so after trimming
         // whitespace we may still have a leading "- " YAML list marker to strip.
         let trimmed = l.trim();
-        let after_dash = trimmed.strip_prefix('-').map(|s| s.trim()).unwrap_or(trimmed);
+        let after_dash = trimmed
+            .strip_prefix('-')
+            .map(|s| s.trim())
+            .unwrap_or(trimmed);
         if let Some(after_uses) = after_dash.strip_prefix("uses:") {
             let val = after_uses.trim();
             val == uses_raw || val.starts_with(&format!("{uses_raw} #"))
@@ -132,7 +135,10 @@ pub fn extract_context(file: &Path, uses_raw: &str, context: usize) -> (Vec<Stri
             let start = pos.saturating_sub(context);
             let end = (pos + context + 1).min(lines.len());
             let highlight = pos - start;
-            (lines[start..end].iter().map(|l| l.to_string()).collect(), highlight)
+            (
+                lines[start..end].iter().map(|l| l.to_string()).collect(),
+                highlight,
+            )
         }
         None => (Vec::new(), 0),
     }
