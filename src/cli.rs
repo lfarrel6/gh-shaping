@@ -70,6 +70,10 @@ pub enum Command {
         /// Write the report to FILE instead of stdout
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
+
+        /// Restrict to a single action (exact match, e.g. `actions/checkout`)
+        #[arg(long, value_name = "ACTION")]
+        action: Option<String>,
     },
 
     /// Pin every unpinned action to the SHA its tag or branch currently resolves to
@@ -112,6 +116,10 @@ pub enum Command {
         /// Navigation: [↑↓ / jk] move  [Enter] pin  [c] changelog  [s] skip  [q] quit
         #[arg(short, long)]
         interactive: bool,
+
+        /// Restrict to a single action (exact match, e.g. `actions/checkout`)
+        #[arg(long, value_name = "ACTION")]
+        action: Option<String>,
     },
 
     /// Update already-pinned actions to the SHA of their latest release
@@ -155,5 +163,9 @@ pub enum Command {
         /// Navigation: [↑↓ / jk] move  [Enter] pin  [c] changelog  [s] skip  [q] quit
         #[arg(short, long)]
         interactive: bool,
+
+        /// Restrict to a single action (exact match, e.g. `actions/checkout`)
+        #[arg(long, value_name = "ACTION")]
+        action: Option<String>,
     },
 }

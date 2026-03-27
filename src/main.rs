@@ -41,31 +41,47 @@ fn main() -> Result<()> {
         Command::Migrate {
             workflows_dir,
             interactive,
+            action,
         } => {
             if interactive {
-                run_migrate_interactive(&workflows_dir, &strategy)
+                run_migrate_interactive(&workflows_dir, action.as_deref(), &strategy)
             } else {
-                run_migrate(&workflows_dir, &strategy)
+                run_migrate(&workflows_dir, action.as_deref(), &strategy)
             }
         }
         Command::Audit {
             workflows_dir,
             output,
-        } => run_audit(&workflows_dir, output.as_deref(), &strategy),
+            action,
+        } => run_audit(
+            &workflows_dir,
+            output.as_deref(),
+            action.as_deref(),
+            &strategy,
+        ),
         Command::Update {
             workflows_dir,
             interactive,
+            action,
         } => {
             if interactive {
-                run_update_interactive(&workflows_dir, &strategy)
+                run_update_interactive(&workflows_dir, action.as_deref(), &strategy)
             } else {
-                run_update(&workflows_dir, &strategy)
+                run_update(&workflows_dir, action.as_deref(), &strategy)
             }
         }
     }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Retain only refs whose action field exactly matches `filter`, or all refs
+/// when `filter` is `None`.
+fn filter_by_action<'a>(refs: &'a [ActionRef], filter: Option<&str>) -> Vec<&'a ActionRef> {
+    refs.iter()
+        .filter(|r| filter.is_none_or(|f| r.action == f))
+        .collect()
+}
 
 /// Parse every workflow file using the provided orchestrator and return all
 /// collected action refs.  Each file is treated as an independent unit of work;
@@ -90,7 +106,7 @@ fn collect_refs(files: &[PathBuf], strategy: &Strategy) -> Vec<ActionRef> {
 
 // ── migrate ───────────────────────────────────────────────────────────────────
 
-fn run_migrate(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
+fn run_migrate(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -98,6 +114,10 @@ fn run_migrate(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     }
 
     let all_refs = collect_refs(&files, strategy);
+    let all_refs: Vec<ActionRef> = filter_by_action(&all_refs, action)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let unique_keys: HashSet<RefKey> = all_refs
         .iter()
@@ -134,7 +154,11 @@ fn run_migrate(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     Ok(())
 }
 
-fn run_migrate_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
+fn run_migrate_interactive(
+    workflows_dir: &Path,
+    action: Option<&str>,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -142,6 +166,10 @@ fn run_migrate_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<
     }
 
     let all_refs = collect_refs(&files, strategy);
+    let all_refs: Vec<ActionRef> = filter_by_action(&all_refs, action)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let unique_unpinned: Vec<&ActionRef> = all_refs
@@ -225,7 +253,12 @@ fn run_migrate_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<
 
 // ── audit ─────────────────────────────────────────────────────────────────────
 
-fn run_audit(workflows_dir: &Path, output: Option<&Path>, strategy: &Strategy) -> Result<()> {
+fn run_audit(
+    workflows_dir: &Path,
+    output: Option<&Path>,
+    action: Option<&str>,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -233,6 +266,10 @@ fn run_audit(workflows_dir: &Path, output: Option<&Path>, strategy: &Strategy) -
     }
 
     let all_refs = collect_refs(&files, strategy);
+    let all_refs: Vec<ActionRef> = filter_by_action(&all_refs, action)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let unique_keys: HashSet<RefKey> = all_refs
         .iter()
@@ -249,7 +286,7 @@ fn run_audit(workflows_dir: &Path, output: Option<&Path>, strategy: &Strategy) -
 
 // ── update ────────────────────────────────────────────────────────────────────
 
-fn run_update(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
+fn run_update(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -257,6 +294,10 @@ fn run_update(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     }
 
     let all_refs = collect_refs(&files, strategy);
+    let all_refs: Vec<ActionRef> = filter_by_action(&all_refs, action)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let pinned_count = all_refs.iter().filter(|r| is_sha(&r.ref_str)).count();
     if pinned_count == 0 {
@@ -291,7 +332,11 @@ fn run_update(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
     Ok(())
 }
 
-fn run_update_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<()> {
+fn run_update_interactive(
+    workflows_dir: &Path,
+    action: Option<&str>,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -299,6 +344,10 @@ fn run_update_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<(
     }
 
     let all_refs = collect_refs(&files, strategy);
+    let all_refs: Vec<ActionRef> = filter_by_action(&all_refs, action)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let unique_pinned: Vec<&ActionRef> = all_refs
@@ -388,4 +437,49 @@ fn run_update_interactive(workflows_dir: &Path, strategy: &Strategy) -> Result<(
         }
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use workflow::ActionRef;
+
+    use super::*;
+
+    fn make_ref(action: &str) -> ActionRef {
+        ActionRef {
+            file: PathBuf::from("workflow.yml"),
+            action: action.to_string(),
+            ref_str: "v1".to_string(),
+            raw: format!("{action}@v1"),
+            inline_comment: None,
+        }
+    }
+
+    #[test]
+    fn filter_by_action_none_returns_all() {
+        let refs = vec![make_ref("actions/checkout"), make_ref("actions/setup-node")];
+        assert_eq!(filter_by_action(&refs, None).len(), 2);
+    }
+
+    #[test]
+    fn filter_by_action_exact_match() {
+        let refs = vec![make_ref("actions/checkout"), make_ref("actions/setup-node")];
+        let filtered = filter_by_action(&refs, Some("actions/checkout"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].action, "actions/checkout");
+    }
+
+    #[test]
+    fn filter_by_action_no_match_returns_empty() {
+        let refs = vec![make_ref("actions/checkout"), make_ref("actions/setup-node")];
+        assert_eq!(filter_by_action(&refs, Some("actions/cache")).len(), 0);
+    }
+
+    #[test]
+    fn filter_by_action_no_partial_match() {
+        let refs = vec![make_ref("actions/checkout")];
+        // "actions" alone must not match "actions/checkout"
+        assert_eq!(filter_by_action(&refs, Some("actions")).len(), 0);
+    }
 }
