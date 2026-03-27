@@ -203,6 +203,41 @@ pub fn list_tags_with_shas(owner: &str, repo: &str) -> Result<Vec<(String, Strin
     Ok(result)
 }
 
+/// Fetch all branches for a GitHub repo with their current commit SHAs,
+/// sorted alphabetically by branch name.
+pub fn list_branches_with_shas(owner: &str, repo: &str) -> Result<Vec<(String, String)>> {
+    let url = format!("https://github.com/{owner}/{repo}");
+    let output = Command::new("git")
+        .args(["ls-remote", "--heads", &url])
+        .output()
+        .map_err(|e| Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: format!("failed to run git ls-remote: {e}"),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: stderr.trim().to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branches: Vec<(String, String)> =
+        stdout.lines().filter_map(parse_branch_line).collect();
+    branches.sort_by(|(a, _), (b, _)| a.cmp(b));
+    Ok(branches)
+}
+
+fn parse_branch_line(line: &str) -> Option<(String, String)> {
+    let (sha, refname) = line.split_once('\t')?;
+    let branch = refname.strip_prefix("refs/heads/")?;
+    Some((branch.to_string(), sha.to_string()))
+}
+
 fn sort_tag_sha_pairs(tags: &mut Vec<(String, String)>) {
     let all_semver = tags.iter().all(|(t, _)| parse_semver(t).is_some());
     if all_semver && !tags.is_empty() {
@@ -280,4 +315,40 @@ fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
     let patch_str = parts[2].split('-').next().unwrap_or(parts[2]);
     let patch = patch_str.parse().ok()?;
     Some((major, minor, patch))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_branch_line_valid() {
+        let sha = "abc123def456abc123def456abc123def456abc1";
+        let line = format!("{sha}\trefs/heads/main");
+        assert_eq!(
+            parse_branch_line(&line),
+            Some(("main".to_string(), sha.to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_branch_line_nested_name() {
+        let sha = "abc123def456abc123def456abc123def456abc1";
+        let line = format!("{sha}\trefs/heads/feat/my-feature");
+        assert_eq!(
+            parse_branch_line(&line),
+            Some(("feat/my-feature".to_string(), sha.to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_branch_line_tag_not_matched() {
+        let sha = "abc123def456abc123def456abc123def456abc1";
+        let line = format!("{sha}\trefs/tags/v1.0.0");
+        assert_eq!(parse_branch_line(&line), None);
+    }
+
+    #[test]
+    fn parse_branch_line_empty() {
+        assert_eq!(parse_branch_line(""), None);
+    }
 }

@@ -36,6 +36,15 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub single_threaded: bool,
 
+    /// Fetch branches in addition to tags.
+    ///
+    /// When set, `git ls-remote --heads` is called for each action and the
+    /// resulting branches are made available alongside tags in the interactive
+    /// TUI (press Tab to switch between the two views).  Has no effect on
+    /// non-interactive runs.
+    #[arg(long, global = true)]
+    pub include_branches: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

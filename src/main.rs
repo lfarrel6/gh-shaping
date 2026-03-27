@@ -36,6 +36,7 @@ fn main() -> Result<()> {
     } else {
         Strategy::Parallel
     };
+    let include_branches = cli.include_branches;
 
     match cli.command {
         Command::Migrate {
@@ -44,7 +45,12 @@ fn main() -> Result<()> {
             action,
         } => {
             if interactive {
-                run_migrate_interactive(&workflows_dir, action.as_deref(), &strategy)
+                run_migrate_interactive(
+                    &workflows_dir,
+                    action.as_deref(),
+                    include_branches,
+                    &strategy,
+                )
             } else {
                 run_migrate(&workflows_dir, action.as_deref(), &strategy)
             }
@@ -65,7 +71,12 @@ fn main() -> Result<()> {
             action,
         } => {
             if interactive {
-                run_update_interactive(&workflows_dir, action.as_deref(), &strategy)
+                run_update_interactive(
+                    &workflows_dir,
+                    action.as_deref(),
+                    include_branches,
+                    &strategy,
+                )
             } else {
                 run_update(&workflows_dir, action.as_deref(), &strategy)
             }
@@ -157,6 +168,7 @@ fn run_migrate(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) 
 fn run_migrate_interactive(
     workflows_dir: &Path,
     action: Option<&str>,
+    include_branches: bool,
     strategy: &Strategy,
 ) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
@@ -201,6 +213,22 @@ fn run_migrate_interactive(
             }
         };
 
+        let branches = if include_branches {
+            eprint!("fetching branches for {}... ", r.action);
+            match resolver::list_branches_with_shas(&key.owner, &key.repo) {
+                Ok(b) => {
+                    eprintln!("{} branch(es)", b.len());
+                    b
+                }
+                Err(e) => {
+                    eprintln!("warning: {e}");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         let (ctx_lines, ctx_highlight) = workflow::extract_context(&r.file, &r.raw, 3);
 
         let choice = interactive::pick_version(
@@ -209,6 +237,7 @@ fn run_migrate_interactive(
             &r.action,
             &r.ref_str,
             &interactive::TagEntry::from_pairs(tags),
+            &interactive::TagEntry::from_pairs(branches),
             ctx_lines,
             ctx_highlight,
             &key.owner,
@@ -335,6 +364,7 @@ fn run_update(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -
 fn run_update_interactive(
     workflows_dir: &Path,
     action: Option<&str>,
+    include_branches: bool,
     strategy: &Strategy,
 ) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
@@ -379,6 +409,22 @@ fn run_update_interactive(
             }
         };
 
+        let branches = if include_branches {
+            eprint!("fetching branches for {}... ", r.action);
+            match resolver::list_branches_with_shas(&key.owner, &key.repo) {
+                Ok(b) => {
+                    eprintln!("{} branch(es)", b.len());
+                    b
+                }
+                Err(e) => {
+                    eprintln!("warning: {e}");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         let current_display = match &r.inline_comment {
             Some(c) => format!("{} ({})", &r.ref_str[..8], c),
             None => r.ref_str[..8].to_string(),
@@ -392,6 +438,7 @@ fn run_update_interactive(
             &r.action,
             &current_display,
             &interactive::TagEntry::from_pairs(tags),
+            &interactive::TagEntry::from_pairs(branches),
             ctx_lines,
             ctx_highlight,
             &key.owner,

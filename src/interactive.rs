@@ -34,13 +34,22 @@ impl TagEntry {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum View {
+    Tags,
+    Branches,
+}
+
 struct App<'a> {
     mode: &'a str,
     file: &'a str,
     action: &'a str,
     current_ref: &'a str,
     tags: &'a [TagEntry],
-    list_state: ListState,
+    branches: &'a [TagEntry],
+    view: View,
+    tags_state: ListState,
+    branches_state: ListState,
     context_lines: Vec<String>,
     context_highlight: usize,
     owner: &'a str,
@@ -54,22 +63,38 @@ impl<'a> App<'a> {
         action: &'a str,
         current_ref: &'a str,
         tags: &'a [TagEntry],
+        branches: &'a [TagEntry],
         context_lines: Vec<String>,
         context_highlight: usize,
         owner: &'a str,
         repo: &'a str,
     ) -> Self {
-        let mut list_state = ListState::default();
+        // Start in branches view only if there are no tags but there are branches
+        let view = if tags.is_empty() && !branches.is_empty() {
+            View::Branches
+        } else {
+            View::Tags
+        };
+
+        let mut tags_state = ListState::default();
         if !tags.is_empty() {
-            list_state.select(Some(0));
+            tags_state.select(Some(0));
         }
+        let mut branches_state = ListState::default();
+        if !branches.is_empty() {
+            branches_state.select(Some(0));
+        }
+
         App {
             mode,
             file,
             action,
             current_ref,
             tags,
-            list_state,
+            branches,
+            view,
+            tags_state,
+            branches_state,
             context_lines,
             context_highlight,
             owner,
@@ -78,21 +103,67 @@ impl<'a> App<'a> {
     }
 
     fn selected(&self) -> Option<&TagEntry> {
-        self.list_state.selected().and_then(|i| self.tags.get(i))
+        match self.view {
+            View::Tags => self.tags_state.selected().and_then(|i| self.tags.get(i)),
+            View::Branches => self
+                .branches_state
+                .selected()
+                .and_then(|i| self.branches.get(i)),
+        }
     }
 
     fn move_up(&mut self) {
-        let i = self.list_state.selected().unwrap_or(0);
-        if i > 0 {
-            self.list_state.select(Some(i - 1));
+        match self.view {
+            View::Tags => {
+                let len = self.tags.len();
+                if len == 0 {
+                    return;
+                }
+                let i = self.tags_state.selected().unwrap_or(0);
+                self.tags_state
+                    .select(Some(if i == 0 { len - 1 } else { i - 1 }));
+            }
+            View::Branches => {
+                let len = self.branches.len();
+                if len == 0 {
+                    return;
+                }
+                let i = self.branches_state.selected().unwrap_or(0);
+                self.branches_state
+                    .select(Some(if i == 0 { len - 1 } else { i - 1 }));
+            }
         }
     }
 
     fn move_down(&mut self) {
-        let i = self.list_state.selected().unwrap_or(0);
-        if i + 1 < self.tags.len() {
-            self.list_state.select(Some(i + 1));
+        match self.view {
+            View::Tags => {
+                let len = self.tags.len();
+                if len == 0 {
+                    return;
+                }
+                let i = self.tags_state.selected().unwrap_or(0);
+                self.tags_state.select(Some((i + 1) % len));
+            }
+            View::Branches => {
+                let len = self.branches.len();
+                if len == 0 {
+                    return;
+                }
+                let i = self.branches_state.selected().unwrap_or(0);
+                self.branches_state.select(Some((i + 1) % len));
+            }
         }
+    }
+
+    fn toggle_view(&mut self) {
+        if self.branches.is_empty() {
+            return;
+        }
+        self.view = match self.view {
+            View::Tags => View::Branches,
+            View::Branches => View::Tags,
+        };
     }
 
     fn open_changelog(&self) {
@@ -108,27 +179,30 @@ impl<'a> App<'a> {
 
 /// Show the interactive version picker TUI. Returns the user's choice.
 ///
-/// - `mode`:             "migrate" or "update"
-/// - `file`:             display path of the workflow file
-/// - `action`:           e.g. "actions/checkout"
-/// - `current_ref`:      current ref in the workflow (tag name or SHA)
-/// - `tags`:             available versions sorted newest-first
-/// - `context_lines`:    YAML lines surrounding the uses: directive
+/// - `mode`:              "migrate" or "update"
+/// - `file`:              display path of the workflow file
+/// - `action`:            e.g. "actions/checkout"
+/// - `current_ref`:       current ref in the workflow (tag name or SHA)
+/// - `tags`:              available versions sorted newest-first
+/// - `branches`:          available branches sorted alphabetically; empty when
+///                        `--include-branches` was not passed
+/// - `context_lines`:     YAML lines surrounding the uses: directive
 /// - `context_highlight`: index of the uses: line within context_lines
-/// - `owner`/`repo`:     for building the GitHub compare URL
+/// - `owner`/`repo`:      for building the GitHub compare URL
 pub fn pick_version(
     mode: &str,
     file: &str,
     action: &str,
     current_ref: &str,
     tags: &[TagEntry],
+    branches: &[TagEntry],
     context_lines: Vec<String>,
     context_highlight: usize,
     owner: &str,
     repo: &str,
 ) -> io::Result<Choice> {
-    if tags.is_empty() {
-        eprintln!("no tags found for {action} — skipping");
+    if tags.is_empty() && branches.is_empty() {
+        eprintln!("no tags or branches found for {action} — skipping");
         return Ok(Choice::Skip);
     }
 
@@ -145,6 +219,7 @@ pub fn pick_version(
         action,
         current_ref,
         tags,
+        branches,
         context_lines,
         context_highlight,
         owner,
@@ -178,6 +253,7 @@ fn run_loop(
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => app.move_up(),
                 KeyCode::Down | KeyCode::Char('j') => app.move_down(),
+                KeyCode::Tab => app.toggle_view(),
                 KeyCode::Enter => {
                     if let Some(entry) = app.selected() {
                         return Ok(Choice::Pin {
@@ -209,7 +285,7 @@ fn render(frame: &mut Frame, app: &mut App) {
     render_title(frame, app, title_area);
     render_info(frame, app, info_area);
     render_content(frame, app, content_area);
-    render_help(frame, help_area);
+    render_help(frame, app, help_area);
 }
 
 fn render_title(frame: &mut Frame, app: &App, area: Rect) {
@@ -257,8 +333,12 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_version_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .tags
+    let (entries, title): (&[TagEntry], &str) = match app.view {
+        View::Tags => (app.tags, " Tags "),
+        View::Branches => (app.branches, " Branches "),
+    };
+
+    let items: Vec<ListItem> = entries
         .iter()
         .map(|entry| {
             let sha_short = if entry.sha.len() >= 12 {
@@ -277,7 +357,7 @@ fn render_version_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Versions "))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .bg(Color::Blue)
@@ -286,7 +366,10 @@ fn render_version_list(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .highlight_symbol("► ");
 
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    match app.view {
+        View::Tags => frame.render_stateful_widget(list, area, &mut app.tags_state),
+        View::Branches => frame.render_stateful_widget(list, area, &mut app.branches_state),
+    }
 }
 
 fn render_context(frame: &mut Frame, app: &App, area: Rect) {
@@ -328,11 +411,13 @@ fn render_context(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn render_help(frame: &mut Frame, area: Rect) {
-    let help = Paragraph::new(
-        "  [↑↓ / jk] navigate   [Enter] pin   [c] changelog in browser   [s] skip   [q] quit",
-    )
-    .style(Style::default().fg(Color::DarkGray));
+fn render_help(frame: &mut Frame, app: &App, area: Rect) {
+    let text = if app.branches.is_empty() {
+        "  [↑↓ / jk] navigate   [Enter] pin   [c] changelog in browser   [s] skip   [q] quit"
+    } else {
+        "  [↑↓ / jk] navigate   [Enter] pin   [Tab] tags/branches   [c] changelog in browser   [s] skip   [q] quit"
+    };
+    let help = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(help, area);
 }
 
