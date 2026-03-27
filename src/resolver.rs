@@ -203,6 +203,161 @@ pub fn list_tags_with_shas(owner: &str, repo: &str) -> Result<Vec<(String, Strin
     Ok(result)
 }
 
+/// Returns the commit SHA at `refs/tags/<tag>`, or `None` if no such tag exists.
+pub fn probe_tag(owner: &str, repo: &str, tag: &str) -> Result<Option<String>> {
+    let url = format!("https://github.com/{owner}/{repo}");
+    let tag_ref = format!("refs/tags/{tag}");
+    let tag_ref_peeled = format!("refs/tags/{tag}^{{}}");
+    let output = Command::new("git")
+        .args(["ls-remote", &url, &tag_ref, &tag_ref_peeled])
+        .output()
+        .map_err(|e| Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: format!("failed to run git ls-remote: {e}"),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: stderr.trim().to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut tag_sha: Option<String> = None;
+    let mut peeled_sha: Option<String> = None;
+    for line in stdout.lines() {
+        if let Some((sha, refname)) = line.split_once('\t') {
+            if refname.ends_with("^{}") {
+                peeled_sha = Some(sha.to_string());
+            } else {
+                tag_sha = Some(sha.to_string());
+            }
+        }
+    }
+    Ok(peeled_sha.or(tag_sha))
+}
+
+/// Returns the commit SHA at `refs/heads/<branch>`, or `None` if no such branch exists.
+pub fn probe_branch(owner: &str, repo: &str, branch: &str) -> Result<Option<String>> {
+    let url = format!("https://github.com/{owner}/{repo}");
+    let head_ref = format!("refs/heads/{branch}");
+    let output = Command::new("git")
+        .args(["ls-remote", &url, &head_ref])
+        .output()
+        .map_err(|e| Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: format!("failed to run git ls-remote: {e}"),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::Git {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            message: stderr.trim().to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().find_map(|line| {
+        let (sha, _) = line.split_once('\t')?;
+        Some(sha.to_string())
+    }))
+}
+
+/// Returns `true` if `ancestor_sha` is reachable from the HEAD of `branch`
+/// within a shallow fetch of `depth` commits.
+///
+/// Creates a temporary directory under `std::env::temp_dir()`, fetches the
+/// branch into a bare git repo, runs `git merge-base --is-ancestor`, then
+/// removes the temporary directory.  Returns `Ok(false)` (fail-safe) if the
+/// SHA is not found within the fetch depth.
+pub fn is_ancestor_of_branch(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    ancestor_sha: &str,
+    depth: usize,
+    verbose: bool,
+) -> Result<bool> {
+    let url = format!("https://github.com/{owner}/{repo}");
+
+    // Build a unique temp dir name; collisions are vanishingly unlikely.
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("gh-shaping-{owner}-{repo}-{suffix}"));
+
+    if verbose {
+        eprintln!("[verbose] ancestry check: temp dir {}", tmp.display());
+    }
+
+    let git = |args: &[&str]| {
+        if verbose {
+            eprintln!("[verbose] ancestry check: git {}", args.join(" "));
+        }
+        Command::new("git")
+            .args([&["-C", tmp.to_str().unwrap_or(".")], args].concat())
+            .output()
+    };
+
+    // Initialise a bare-ish repo, fetch the branch shallowly, then check ancestry.
+    let result = (|| -> std::io::Result<bool> {
+        std::fs::create_dir_all(&tmp)?;
+
+        git(&["init", "-q"])?;
+
+        let depth_str = depth.to_string();
+        let head_ref = format!("refs/heads/{branch}");
+        let fetch_out = git(&["fetch", "--depth", &depth_str, &url, &head_ref])?;
+        if verbose {
+            let stderr = String::from_utf8_lossy(&fetch_out.stderr);
+            if !stderr.trim().is_empty() {
+                eprintln!("[verbose] ancestry check: fetch stderr: {}", stderr.trim());
+            }
+        }
+        if !fetch_out.status.success() {
+            if verbose {
+                eprintln!(
+                    "[verbose] ancestry check: fetch failed (exit {:?})",
+                    fetch_out.status.code()
+                );
+            }
+            return Ok(false);
+        }
+
+        let merge_out = git(&["merge-base", "--is-ancestor", ancestor_sha, "FETCH_HEAD"])?;
+        let is_ancestor = merge_out.status.success();
+        if verbose {
+            eprintln!(
+                "[verbose] ancestry check: merge-base exit {} → {}",
+                merge_out.status.code().unwrap_or(-1),
+                if is_ancestor {
+                    "ancestor confirmed"
+                } else {
+                    "not an ancestor"
+                }
+            );
+        }
+        Ok(is_ancestor)
+    })();
+
+    // Always clean up, even on error.
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    result.map_err(|e| Error::Git {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        message: format!("ancestry check failed: {e}"),
+    })
+}
+
 /// Fetch all branches for a GitHub repo with their current commit SHAs,
 /// sorted alphabetically by branch name.
 pub fn list_branches_with_shas(owner: &str, repo: &str) -> Result<Vec<(String, String)>> {
@@ -350,5 +505,41 @@ mod tests {
     #[test]
     fn parse_branch_line_empty() {
         assert_eq!(parse_branch_line(""), None);
+    }
+
+    // probe_tag / probe_branch parsing logic
+    fn parse_ls_remote_tag(stdout: &str) -> Option<String> {
+        let mut tag_sha: Option<String> = None;
+        let mut peeled_sha: Option<String> = None;
+        for line in stdout.lines() {
+            if let Some((sha, refname)) = line.split_once('\t') {
+                if refname.ends_with("^{}") {
+                    peeled_sha = Some(sha.to_string());
+                } else {
+                    tag_sha = Some(sha.to_string());
+                }
+            }
+        }
+        peeled_sha.or(tag_sha)
+    }
+
+    #[test]
+    fn probe_tag_prefers_peeled_sha() {
+        let tag_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let commit_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let stdout = format!("{tag_sha}\trefs/tags/v1.0.0\n{commit_sha}\trefs/tags/v1.0.0^{{}}\n");
+        assert_eq!(parse_ls_remote_tag(&stdout), Some(commit_sha.to_string()));
+    }
+
+    #[test]
+    fn probe_tag_lightweight_tag_no_peeled() {
+        let sha = "cccccccccccccccccccccccccccccccccccccccc";
+        let stdout = format!("{sha}\trefs/tags/v2.0.0\n");
+        assert_eq!(parse_ls_remote_tag(&stdout), Some(sha.to_string()));
+    }
+
+    #[test]
+    fn probe_tag_empty_output_returns_none() {
+        assert_eq!(parse_ls_remote_tag(""), None);
     }
 }

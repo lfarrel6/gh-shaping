@@ -45,6 +45,25 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub include_branches: bool,
 
+    /// Print detailed diagnostic output during execution.
+    ///
+    /// Logs every git call, its raw output, classification decisions, regex
+    /// patterns, and the outcome of each ancestry check.  Useful for diagnosing
+    /// why a particular pin is not being updated as expected.
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+
+    /// Skip the git ancestry check when updating branch-pinned actions.
+    ///
+    /// By default, when `update` detects that an inline comment (e.g. `# main`)
+    /// refers to a branch rather than a tag, it performs a shallow fetch and
+    /// verifies that the currently pinned SHA is reachable from that branch
+    /// before applying the update.  Pass this flag to bypass that check, which
+    /// can be useful when the pin is older than the fetch depth (100 commits)
+    /// or when network latency makes the extra call undesirable.
+    #[arg(long, global = true)]
+    pub disable_ancestry_checks: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

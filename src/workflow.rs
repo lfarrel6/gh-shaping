@@ -149,20 +149,74 @@ pub fn extract_context(file: &Path, uses_raw: &str, context: usize) -> (Vec<Stri
 fn find_inline_comment(content: &str, uses_value: &str) -> Option<String> {
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("uses:") {
-            // The value portion after "uses:"
-            let after_uses = trimmed["uses:".len()..].trim();
-            // after_uses might be: "actions/checkout@abc123 # v4"
-            // or just: "actions/checkout@v4"
-            if let Some((value_part, comment_part)) = after_uses.split_once('#') {
-                if value_part.trim() == uses_value {
-                    let comment = comment_part.trim().to_string();
-                    if !comment.is_empty() {
-                        return Some(comment);
-                    }
+        // Step lines are YAML list items: "        - uses: owner/repo@sha # label"
+        // Strip the optional leading "- " before checking for "uses:".
+        let after_dash = trimmed
+            .strip_prefix('-')
+            .map(|s| s.trim())
+            .unwrap_or(trimmed);
+        if !after_dash.starts_with("uses:") {
+            continue;
+        }
+        let after_uses = after_dash["uses:".len()..].trim();
+        if let Some((value_part, comment_part)) = after_uses.split_once('#') {
+            if value_part.trim() == uses_value {
+                let comment = comment_part.trim().to_string();
+                if !comment.is_empty() {
+                    return Some(comment);
                 }
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_inline_comment_list_item_with_dash() {
+        // The common case: step as a YAML list item with leading indentation and dash
+        let content = "      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable\n";
+        assert_eq!(
+            find_inline_comment(
+                content,
+                "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+            ),
+            Some("stable".to_string())
+        );
+    }
+
+    #[test]
+    fn find_inline_comment_bare_uses_line() {
+        // Less common but valid: no leading dash
+        let content = "uses: actions/checkout@abc123def456abc123def456abc123def456abc123 # v4\n";
+        assert_eq!(
+            find_inline_comment(
+                content,
+                "actions/checkout@abc123def456abc123def456abc123def456abc123"
+            ),
+            Some("v4".to_string())
+        );
+    }
+
+    #[test]
+    fn find_inline_comment_no_comment_returns_none() {
+        let content =
+            "      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8\n";
+        assert_eq!(
+            find_inline_comment(
+                content,
+                "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn find_inline_comment_wrong_value_returns_none() {
+        let content = "      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable\n";
+        assert_eq!(find_inline_comment(content, "actions/checkout@v4"), None);
+    }
 }

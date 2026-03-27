@@ -86,6 +86,47 @@ cargo gh-shaping update --interactive
 Tags are sorted by semver when all tags follow `vMAJOR.MINOR.PATCH`, and by
 reverse-lexicographic order otherwise.
 
+### How update resolves a pinned action
+
+Each pinned `uses:` line carries an inline comment written by `migrate` that
+records what ref the SHA was originally resolved from — for example
+`# v4` for a tag or `# stable` for a branch. The `update` command reads that
+comment to decide which update strategy to apply.
+
+**Tag-pinned actions** are updated to the SHA of the latest release tag for the
+same repository, regardless of which specific tag was originally pinned. This
+means `# v4.1.0` will advance to `# v4.2.0` if a newer tag exists.
+
+**Branch-pinned actions** are updated to the current HEAD commit of the named
+branch. Before applying the update, `update` performs an ancestry check to
+confirm that the currently pinned SHA is actually in that branch's recent
+history. This guards against a scenario where a branch was created after the
+pin was written (for example, a branch whose name coincidentally matches a tag).
+The check can be bypassed with `--disable-ancestry-checks` if the pin predates
+the fetch depth.
+
+Tags are always checked before branches. If a branch and a tag share the same
+name, the tag path wins.
+
+```mermaid
+flowchart TD
+    A([pinned uses: line]) --> B{inline comment\npresent?}
+    B -- no --> TAG[tag path]
+    B -- yes --> C{refs/tags/comment\nexists?}
+    C -- yes --> TAG
+    C -- no --> D{refs/heads/comment\nexists?}
+    D -- no --> SKIP([skip with warning])
+    D -- yes --> E{ancestry check\ndisabled?}
+    E -- yes --> BRANCH[branch path]
+    E -- no --> F{current SHA in\nlast 100 commits?}
+    F -- no --> SKIP
+    F -- yes --> BRANCH
+    TAG --> G[resolve latest tag\nSHA for repo]
+    BRANCH --> H[resolve current\nbranch HEAD SHA]
+    G --> I([rewrite file])
+    H --> I
+```
+
 ## Interactive mode
 
 The interactive TUI is available for both `migrate` and `update`. It shows:

@@ -37,6 +37,8 @@ fn main() -> Result<()> {
         Strategy::Parallel
     };
     let include_branches = cli.include_branches;
+    let disable_ancestry_checks = cli.disable_ancestry_checks;
+    let verbose = cli.verbose;
 
     match cli.command {
         Command::Migrate {
@@ -78,7 +80,13 @@ fn main() -> Result<()> {
                     &strategy,
                 )
             } else {
-                run_update(&workflows_dir, action.as_deref(), &strategy)
+                run_update(
+                    &workflows_dir,
+                    action.as_deref(),
+                    disable_ancestry_checks,
+                    verbose,
+                    &strategy,
+                )
             }
         }
     }
@@ -315,7 +323,13 @@ fn run_audit(
 
 // ── update ────────────────────────────────────────────────────────────────────
 
-fn run_update(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -> Result<()> {
+fn run_update(
+    workflows_dir: &Path,
+    action: Option<&str>,
+    disable_ancestry_checks: bool,
+    verbose: bool,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
@@ -335,7 +349,7 @@ fn run_update(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -
     }
 
     println!("checking {pinned_count} pinned action(s) for updates...");
-    let results = updater::run_updates(&all_refs)?;
+    let results = updater::run_updates(&all_refs, disable_ancestry_checks, verbose)?;
 
     let updated: Vec<_> = results.iter().filter(|r| r.updated).collect();
     let current: Vec<_> = results.iter().filter(|r| !r.updated).collect();
@@ -346,11 +360,11 @@ fn run_update(workflows_dir: &Path, action: Option<&str>, strategy: &Strategy) -
             r.action,
             &r.old_sha[..8],
             &r.new_sha[..8],
-            r.tag,
+            r.label,
         );
     }
     for r in &current {
-        println!("  current  {}  {} ({})", r.action, &r.old_sha[..8], r.tag);
+        println!("  current  {}  {} ({})", r.action, &r.old_sha[..8], r.label);
     }
 
     if updated.is_empty() {
