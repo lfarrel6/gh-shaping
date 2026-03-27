@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 use crate::error::{Error, Result};
+use crate::orchestrator::Strategy;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct RefKey {
@@ -124,15 +125,25 @@ pub fn resolve(key: &RefKey) -> Result<ResolvedSha> {
     })
 }
 
-/// Resolve all unique RefKeys, collecting errors as strings so one failure doesn't abort.
+/// Resolve all unique RefKeys using the provided strategy.
+///
+/// Each key is an independent unit of work (one `git ls-remote` call), so
+/// they map naturally onto the strategy's worker slots.  Errors are collected
+/// as strings rather than propagated so that one failed lookup does not abort
+/// the rest.
 pub fn resolve_all(
     keys: impl IntoIterator<Item = RefKey>,
+    strategy: &Strategy,
 ) -> HashMap<RefKey, std::result::Result<ResolvedSha, String>> {
-    keys.into_iter()
-        .map(|k| {
-            let result = resolve(&k).map_err(|e| e.to_string());
-            (k, result)
-        })
+    strategy
+        .run(
+            keys.into_iter().collect(),
+            &|key| {
+                let result = resolve(&key).map_err(|e| e.to_string());
+                (key, result)
+            },
+        )
+        .into_iter()
         .collect()
 }
 

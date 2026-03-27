@@ -2,64 +2,89 @@ mod auditor;
 mod cli;
 mod error;
 mod interactive;
+mod orchestrator;
 mod pinner;
 mod resolver;
 mod updater;
 mod workflow;
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
 use cli::{Cli, Command};
 use error::Result;
+use orchestrator::Strategy;
 use resolver::{RefKey, is_sha, resolve_all};
+use workflow::ActionRef;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    let strategy = if cli.single_threaded {
+        Strategy::Sequential
+    } else {
+        Strategy::Parallel
+    };
+
     match cli.command {
         Command::Migrate { workflows_dir, interactive } => {
             if interactive {
-                run_migrate_interactive(&workflows_dir)
+                run_migrate_interactive(&workflows_dir, &strategy)
             } else {
-                run_migrate(&workflows_dir)
+                run_migrate(&workflows_dir, &strategy)
             }
         }
-        Command::Audit { workflows_dir, output } => run_audit(&workflows_dir, output.as_deref()),
+        Command::Audit { workflows_dir, output } => {
+            run_audit(&workflows_dir, output.as_deref(), &strategy)
+        }
         Command::Update { workflows_dir, interactive } => {
             if interactive {
-                run_update_interactive(&workflows_dir)
+                run_update_interactive(&workflows_dir, &strategy)
             } else {
-                run_update(&workflows_dir)
+                run_update(&workflows_dir, &strategy)
             }
         }
     }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-fn collect_refs(files: &[std::path::PathBuf]) -> Vec<workflow::ActionRef> {
-    let mut all_refs = Vec::new();
-    for file in files {
-        match workflow::extract_action_refs(file) {
-            Ok(refs) => all_refs.extend(refs),
-            Err(e) => eprintln!("warning: skipping {}: {e}", file.display()),
-        }
-    }
-    all_refs
+/// Parse every workflow file using the provided orchestrator and return all
+/// collected action refs.  Each file is treated as an independent unit of work;
+/// errors are printed as warnings and result in an empty contribution from that
+/// file rather than aborting the run.
+fn collect_refs(files: &[PathBuf], strategy: &Strategy) -> Vec<ActionRef> {
+    strategy
+        .run(
+            files.to_vec(),
+            &|file| match workflow::extract_action_refs(&file) {
+                Ok(refs) => refs,
+                Err(e) => {
+                    eprintln!("warning: skipping {}: {e}", file.display());
+                    Vec::new()
+                }
+            },
+        )
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 // ── migrate ───────────────────────────────────────────────────────────────────
 
-fn run_migrate(workflows_dir: &Path) -> Result<()> {
+fn run_migrate(
+    workflows_dir: &Path,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
         return Ok(());
     }
 
-    let all_refs = collect_refs(&files);
+    let all_refs = collect_refs(&files, strategy);
 
     let unique_keys: HashSet<RefKey> = all_refs
         .iter()
@@ -68,7 +93,7 @@ fn run_migrate(workflows_dir: &Path) -> Result<()> {
         .collect();
 
     println!("resolving {} unique action ref(s)...", unique_keys.len());
-    let resolution_map = resolve_all(unique_keys);
+    let resolution_map = resolve_all(unique_keys, strategy);
 
     let mut total = 0;
     for file in &files {
@@ -92,18 +117,20 @@ fn run_migrate(workflows_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_migrate_interactive(workflows_dir: &Path) -> Result<()> {
+fn run_migrate_interactive(
+    workflows_dir: &Path,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
         return Ok(());
     }
 
-    let all_refs = collect_refs(&files);
+    let all_refs = collect_refs(&files, strategy);
 
-    // Process each unique unpinned (action, ref_str) pair once
     let mut seen: HashSet<(String, String)> = HashSet::new();
-    let unique_unpinned: Vec<&workflow::ActionRef> = all_refs
+    let unique_unpinned: Vec<&ActionRef> = all_refs
         .iter()
         .filter(|r| !is_sha(&r.ref_str))
         .filter(|r| seen.insert((r.action.clone(), r.ref_str.clone())))
@@ -126,8 +153,7 @@ fn run_migrate_interactive(workflows_dir: &Path) -> Result<()> {
             Err(e) => { eprintln!("error: {e}"); continue; }
         };
 
-        let (ctx_lines, ctx_highlight) =
-            workflow::extract_context(&r.file, &r.raw, 3);
+        let (ctx_lines, ctx_highlight) = workflow::extract_context(&r.file, &r.raw, 3);
 
         let choice = interactive::pick_version(
             "migrate",
@@ -140,11 +166,10 @@ fn run_migrate_interactive(workflows_dir: &Path) -> Result<()> {
             &key.owner,
             &key.repo,
         )
-        .map_err(|e| error::Error::Io(e))?;
+        .map_err(error::Error::Io)?;
 
         match choice {
             interactive::Choice::Pin { sha, tag } => {
-                // Apply to every file containing this action@ref
                 let mut pinned = 0;
                 for file in &files {
                     let has_ref = all_refs.iter().any(|ar| {
@@ -163,13 +188,8 @@ fn run_migrate_interactive(workflows_dir: &Path) -> Result<()> {
                     r.action, r.ref_str, &sha[..8], tag
                 );
             }
-            interactive::Choice::Skip => {
-                println!("skipped {}", r.action);
-            }
-            interactive::Choice::Quit => {
-                println!("quit");
-                return Ok(());
-            }
+            interactive::Choice::Skip => println!("skipped {}", r.action),
+            interactive::Choice::Quit => { println!("quit"); return Ok(()); }
         }
     }
     Ok(())
@@ -177,14 +197,18 @@ fn run_migrate_interactive(workflows_dir: &Path) -> Result<()> {
 
 // ── audit ─────────────────────────────────────────────────────────────────────
 
-fn run_audit(workflows_dir: &Path, output: Option<&Path>) -> Result<()> {
+fn run_audit(
+    workflows_dir: &Path,
+    output: Option<&Path>,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
         return Ok(());
     }
 
-    let all_refs = collect_refs(&files);
+    let all_refs = collect_refs(&files, strategy);
 
     let unique_keys: HashSet<RefKey> = all_refs
         .iter()
@@ -192,7 +216,7 @@ fn run_audit(workflows_dir: &Path, output: Option<&Path>) -> Result<()> {
         .collect();
 
     eprintln!("resolving {} unique action ref(s)...", unique_keys.len());
-    let resolution_map = resolve_all(unique_keys);
+    let resolution_map = resolve_all(unique_keys, strategy);
 
     let rows = auditor::build_report(&all_refs, &resolution_map);
     auditor::write_report(&rows, output)?;
@@ -201,14 +225,17 @@ fn run_audit(workflows_dir: &Path, output: Option<&Path>) -> Result<()> {
 
 // ── update ────────────────────────────────────────────────────────────────────
 
-fn run_update(workflows_dir: &Path) -> Result<()> {
+fn run_update(
+    workflows_dir: &Path,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
         return Ok(());
     }
 
-    let all_refs = collect_refs(&files);
+    let all_refs = collect_refs(&files, strategy);
 
     let pinned_count = all_refs.iter().filter(|r| is_sha(&r.ref_str)).count();
     if pinned_count == 0 {
@@ -240,18 +267,20 @@ fn run_update(workflows_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_update_interactive(workflows_dir: &Path) -> Result<()> {
+fn run_update_interactive(
+    workflows_dir: &Path,
+    strategy: &Strategy,
+) -> Result<()> {
     let files = workflow::find_workflow_files(workflows_dir)?;
     if files.is_empty() {
         eprintln!("no workflow files found in {}", workflows_dir.display());
         return Ok(());
     }
 
-    let all_refs = collect_refs(&files);
+    let all_refs = collect_refs(&files, strategy);
 
-    // Unique pinned (action, sha) pairs
     let mut seen: HashSet<(String, String)> = HashSet::new();
-    let unique_pinned: Vec<&workflow::ActionRef> = all_refs
+    let unique_pinned: Vec<&ActionRef> = all_refs
         .iter()
         .filter(|r| is_sha(&r.ref_str))
         .filter(|r| seen.insert((r.action.clone(), r.ref_str.clone())))
@@ -274,15 +303,12 @@ fn run_update_interactive(workflows_dir: &Path) -> Result<()> {
             Err(e) => { eprintln!("error: {e}"); continue; }
         };
 
-        // The "current ref" for display and compare URL is the pinned SHA,
-        // annotated with the inline comment if available (e.g. "abc12345 # v3")
         let current_display = match &r.inline_comment {
             Some(c) => format!("{} ({})", &r.ref_str[..8], c),
             None => r.ref_str[..8].to_string(),
         };
 
-        let (ctx_lines, ctx_highlight) =
-            workflow::extract_context(&r.file, &r.raw, 3);
+        let (ctx_lines, ctx_highlight) = workflow::extract_context(&r.file, &r.raw, 3);
 
         let choice = interactive::pick_version(
             "update",
@@ -295,7 +321,7 @@ fn run_update_interactive(workflows_dir: &Path) -> Result<()> {
             &key.owner,
             &key.repo,
         )
-        .map_err(|e| error::Error::Io(e))?;
+        .map_err(error::Error::Io)?;
 
         match choice {
             interactive::Choice::Pin { sha, tag } => {
@@ -322,13 +348,8 @@ fn run_update_interactive(workflows_dir: &Path) -> Result<()> {
                     r.action, &r.ref_str[..8], &sha[..8], tag,
                 );
             }
-            interactive::Choice::Skip => {
-                println!("skipped {}", r.action);
-            }
-            interactive::Choice::Quit => {
-                println!("quit");
-                return Ok(());
-            }
+            interactive::Choice::Skip => println!("skipped {}", r.action),
+            interactive::Choice::Quit => { println!("quit"); return Ok(()); }
         }
     }
     Ok(())

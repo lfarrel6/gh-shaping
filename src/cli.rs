@@ -28,6 +28,14 @@ Run `cargo gh-shaping <COMMAND> --help` for per-command options and examples.";
 credential helpers, ~/.netrc).  No GITHUB_TOKEN required.",
 )]
 pub struct Cli {
+    /// Process workflow files one at a time instead of in parallel.
+    ///
+    /// By default each file is parsed on its own thread. Pass this flag to
+    /// disable that behaviour, which can be useful when debugging or when
+    /// running inside an environment that does not support threads.
+    #[arg(long, global = true)]
+    pub single_threaded: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
