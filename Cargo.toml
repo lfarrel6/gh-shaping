@@ -1,6 +1,7 @@
 [package]
 name        = "cargo-gh-shaping"
 description = "Small commandline tool for pinning github actions to commit shas instead of using mutable tags"
+homepage    = "https://github.com/lfarrel6/gh-shaping"
 license     = "MIT"
 version     = "0.1.0"
 edition     = "2024"
