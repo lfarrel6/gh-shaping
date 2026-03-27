@@ -20,7 +20,16 @@ use resolver::{RefKey, is_sha, resolve_all};
 use workflow::ActionRef;
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    // When invoked as a cargo subcommand (`cargo gh-shaping <cmd>`), cargo
+    // inserts "gh-shaping" as the first argument.  Strip it so that clap sees
+    // the same shape whether the binary is called directly or via cargo.
+    let args: Vec<_> = std::env::args_os()
+        .enumerate()
+        .filter(|(i, arg)| !(*i == 1 && arg == "gh-shaping"))
+        .map(|(_, arg)| arg)
+        .collect();
+
+    let cli = Cli::parse_from(args);
 
     let strategy = if cli.single_threaded {
         Strategy::Sequential
